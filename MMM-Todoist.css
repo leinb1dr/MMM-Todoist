@@ -109,11 +109,15 @@
 .divTableRow.todoCompleting .title,
 .divTableRow.todoComplete .title {
 	text-decoration: line-through !important;
-	text-decoration-thickness: 2px;
+	text-decoration-thickness: 3px;
+}
+
+.divTableRow.todoComplete .title s {
+	text-decoration-thickness: 3px;
 }
 
 .divTableRow.todoComplete {
-	opacity: 0.55;
+	opacity: 0.8;
 	cursor: default;
 }
 
