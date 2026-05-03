@@ -307,6 +307,31 @@ Module.register("MMM-Todoist", {
 		}));
 	},
 
+	isCompletedItem: function(item) {
+		return item.is_completed === true || item.checked === true || item.completed_at !== null && item.completed_at !== undefined;
+	},
+
+	isCompletedToday: function(item) {
+		if (!this.isCompletedItem(item)) {
+			return false;
+		}
+
+		var completedAt = item.completed_at || item.completed_date || item.completedAt;
+		if (!completedAt) {
+			return false;
+		}
+
+		var completedDate = new Date(completedAt);
+		if (isNaN(completedDate.getTime())) {
+			return false;
+		}
+
+		var today = new Date();
+		return completedDate.getFullYear() === today.getFullYear() &&
+			completedDate.getMonth() === today.getMonth() &&
+			completedDate.getDate() === today.getDate();
+	},
+
 	handleCloseTaskError: function (payload) {
 		Log.error("MMM-Todoist: Failed to close task " + payload.taskId + ": " + payload.error);
 		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
@@ -357,8 +382,22 @@ Module.register("MMM-Todoist", {
 				}
 			}
 		}
+		tasks.items = tasks.items.filter(function(item) {
+			if (!self.isCompletedItem(item)) {
+				item.is_completed = false;
+				return true;
+			}
+
+			item.is_completed = true;
+			return self.config.showComplete === true && self.isCompletedToday(item);
+		});
+
 		if (self.config.displayTasksWithinDays > -1 || !self.config.displayTasksWithoutDue) {
 			tasks.items = tasks.items.filter(function (item) {
+				if (item.is_completed) {
+					return true;
+				}
+
 				if (item.due === null) {
 					return self.config.displayTasksWithoutDue;
 				}
