@@ -108,7 +108,8 @@
 
 .divTableRow.todoCompleting .title,
 .divTableRow.todoComplete .title {
-	text-decoration: line-through;
+	text-decoration: line-through !important;
+	text-decoration-thickness: 2px;
 }
 
 .divTableRow.todoComplete {
