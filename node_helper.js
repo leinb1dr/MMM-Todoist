@@ -114,21 +114,6 @@ module.exports = NodeHelper.create({
 		return data && data.sync_status && data.sync_status[commandUuid] === "ok";
 	},
 
-	todayDateString: function(offsetDays) {
-		var date = new Date();
-		date.setDate(date.getDate() + (offsetDays || 0));
-		var month = String(date.getMonth() + 1).padStart(2, "0");
-		var day = String(date.getDate()).padStart(2, "0");
-		return date.getFullYear() + "-" + month + "-" + day;
-	},
-
-	todayBoundaryISOString: function(offsetDays) {
-		var date = new Date();
-		date.setHours(0, 0, 0, 0);
-		date.setDate(date.getDate() + (offsetDays || 0));
-		return date.toISOString();
-	},
-
 	addContentHtml: function(items) {
 		let markdownConverter = null;
 		if (showdown) {
@@ -143,90 +128,6 @@ module.exports = NodeHelper.create({
 					item.contentHtml = item.content;
 				}
 			}
-		});
-	},
-
-	getCompletedItemsFromResponse: function(data) {
-		if (Array.isArray(data)) {
-			return data;
-		}
-
-		if (data && Array.isArray(data.items)) {
-			return data.items;
-		}
-
-		if (data && Array.isArray(data.tasks)) {
-			return data.tasks;
-		}
-
-		if (data && Array.isArray(data.results)) {
-			return data.results;
-		}
-
-		return [];
-	},
-
-	isCompletedToday: function(item) {
-		var completedAt = item.completed_at || item.completed_date || item.completedAt;
-		if (!completedAt) {
-			return false;
-		}
-
-		var completedDate = new Date(completedAt);
-		if (isNaN(completedDate.getTime())) {
-			return false;
-		}
-
-		var today = new Date();
-		return completedDate.getFullYear() === today.getFullYear() &&
-			completedDate.getMonth() === today.getMonth() &&
-			completedDate.getDate() === today.getDate();
-	},
-
-	normalizeCompletedItem: function(item) {
-		var normalized = Object.assign({}, item);
-		normalized.id = item.id || item.task_id || item.item_id;
-		normalized.content = item.content || item.task_content || item.name || "";
-		normalized.project_id = item.project_id || (item.project && item.project.id);
-		normalized.labels = item.labels || [];
-		normalized.priority = item.priority || 1;
-		normalized.child_order = item.child_order || 0;
-		normalized.parent_id = item.parent_id || null;
-		normalized.due = item.due || null;
-		normalized.is_completed = true;
-		normalized.completed_at = item.completed_at || item.completed_date || item.completedAt;
-		return normalized;
-	},
-
-	fetchCompletedTodos: function(accessCode) {
-		var self = this;
-		var completedUrl = self.config.apiBase + "/" + self.config.apiVersion + "/tasks/completed/by_completion_date";
-
-		return axios.get(completedUrl, {
-			headers: {
-				"cache-control": "no-cache",
-				"Authorization": "Bearer " + accessCode
-			},
-			params: {
-				since: self.todayBoundaryISOString(),
-				until: self.todayBoundaryISOString(1)
-			}
-		})
-		.then(function(response) {
-			if (self.config.debug) {
-				console.log("MMM-Todoist Completed API Response:", JSON.stringify(response.data, null, 2));
-			}
-
-			return self.getCompletedItemsFromResponse(response.data)
-				.filter(function(item) {
-					return self.isCompletedToday(item);
-				})
-				.map(function(item) {
-					return self.normalizeCompletedItem(item);
-				})
-				.filter(function(item) {
-					return item.id;
-				});
 		});
 	},
 
@@ -276,20 +177,9 @@ module.exports = NodeHelper.create({
 					return;
 				}
 
-				var completedRequest = Promise.resolve([]);
-				if (self.config.showComplete === true) {
-					completedRequest = self.fetchCompletedTodos(accessCode);
-				}
-
-				completedRequest.then(function(completedItems) {
-					taskJson.items = taskJson.items.concat(completedItems);
-					self.addContentHtml(taskJson.items);
-					taskJson.accessToken = accessCode;
-					self.sendSocketNotification("TASKS", taskJson);
-				})
-				.catch(function(error) {
-					self.handleFetchError(error);
-				});
+				self.addContentHtml(taskJson.items);
+				taskJson.accessToken = accessCode;
+				self.sendSocketNotification("TASKS", taskJson);
 			} else {
 				console.error("MMM-Todoist: Unexpected response status: " + response.status);
 				self.sendSocketNotification("FETCH_ERROR", {
