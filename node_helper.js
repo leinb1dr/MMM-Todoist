@@ -9,6 +9,7 @@
  */
 
 const NodeHelper = require("node_helper");
+const crypto = require("crypto");
 
 let axios;
 let showdown;
@@ -64,14 +65,29 @@ module.exports = NodeHelper.create({
 			return;
 		}
 
-		var url = "https://api.todoist.com/api/v1/tasks/" + taskId + "/close";
+		var command = {
+			type: "item_complete",
+			uuid: crypto.randomUUID(),
+			args: {
+				id: taskId
+			}
+		};
+		var url = (this.config && this.config.apiBase ? this.config.apiBase : "https://api.todoist.com/api") +
+			"/" + (this.config && this.config.apiVersion ? this.config.apiVersion : "v1") + "/sync";
+		var params = new URLSearchParams();
+		params.append("commands", JSON.stringify([command]));
 
-		axios.post(url, null, {
+		axios.post(url, params.toString(), {
 			headers: {
+				"content-type": "application/x-www-form-urlencoded",
 				"Authorization": "Bearer " + accessToken
 			}
 		})
 		.then(function(response) {
+			if (!self.syncCommandSucceeded(response.data, command.uuid)) {
+				throw new Error("Sync command failed: " + JSON.stringify(response.data && response.data.sync_status));
+			}
+
 			console.log("MMM-Todoist: Task " + taskId + " closed successfully.");
 			self.sendSocketNotification("TASK_CLOSED", { taskId: taskId });
 		})
@@ -92,6 +108,10 @@ module.exports = NodeHelper.create({
 				error: errorMessage
 			});
 		});
+	},
+
+	syncCommandSucceeded: function(data, commandUuid) {
+		return data && data.sync_status && data.sync_status[commandUuid] === "ok";
 	},
 
 	todayDateString: function(offsetDays) {
