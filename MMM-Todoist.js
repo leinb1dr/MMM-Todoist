@@ -590,8 +590,11 @@ Module.register("MMM-Todoist", {
 			// this item is a subtask so indent it
 			taskText = '- ' + taskText;
 		}
-		return this.createCell("title bright alignLeft", 
-			this.shorten(taskText, this.config.maxTitleLength, this.config.wrapEvents));
+		var displayText = this.shorten(taskText, this.config.maxTitleLength, this.config.wrapEvents);
+		if (item.is_completed) {
+			displayText = "<s>" + displayText + "</s>";
+		}
+		return this.createCell("title bright alignLeft", displayText);
 	},
 	addDueDateCell: function(item) {
 		var className = "bright align-right dueDate ";
