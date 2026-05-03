@@ -36,7 +36,62 @@ module.exports = NodeHelper.create({
 		if (notification === "FETCH_TODOIST") {
 			this.config = payload;
 			this.fetchTodos();
+		} else if (notification === "TODOIST_CLOSE_TASK") {
+			this.closeTask(payload);
 		}
+	},
+
+	closeTask: function(payload) {
+		var self = this;
+		var taskId = payload.taskId;
+		var accessToken = payload.accessToken;
+
+		if (!axios) {
+			console.error("MMM-Todoist: axios is not available. Cannot close task.");
+			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+				taskId: taskId,
+				error: "Missing dependency: axios"
+			});
+			return;
+		}
+
+		if (!accessToken) {
+			console.error("MMM-Todoist: AccessToken not set, cannot close task.");
+			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+				taskId: taskId,
+				error: "AccessToken not configured"
+			});
+			return;
+		}
+
+		var url = "https://api.todoist.com/api/v1/tasks/" + taskId + "/close";
+
+		axios.post(url, null, {
+			headers: {
+				"Authorization": "Bearer " + accessToken
+			}
+		})
+		.then(function(response) {
+			console.log("MMM-Todoist: Task " + taskId + " closed successfully.");
+			self.sendSocketNotification("TASK_CLOSED", { taskId: taskId });
+		})
+		.catch(function(error) {
+			var errorMessage = "Unknown error";
+			if (error.response) {
+				errorMessage = "API Error: " + error.response.status;
+				console.error("MMM-Todoist: Failed to close task " + taskId + ":", error.response.status, error.response.data);
+			} else if (error.request) {
+				errorMessage = "No response from Todoist API: " + error.message;
+				console.error("MMM-Todoist: No response closing task " + taskId + ":", error.message);
+			} else {
+				errorMessage = "Request error: " + error.message;
+				console.error("MMM-Todoist: Error closing task " + taskId + ":", error.message);
+			}
+			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+				taskId: taskId,
+				error: errorMessage
+			});
+		});
 	},
 
 	fetchTodos : function() {

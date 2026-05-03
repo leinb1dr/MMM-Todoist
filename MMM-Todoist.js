@@ -241,6 +241,56 @@ Module.register("MMM-Todoist", {
 			this.updateDom(1000);
 		} else if (notification === "FETCH_ERROR") {
 			Log.error("Todoist Error. Could not fetch todos: " + payload.error);
+		} else if (notification === "TASK_CLOSED") {
+			this.handleTaskClosed(payload);
+		} else if (notification === "CLOSE_TASK_ERROR") {
+			this.handleCloseTaskError(payload);
+		}
+	},
+
+	completeTask: function (taskId) {
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row && row.classList.contains("todoCompleting")) {
+			return;
+		}
+		if (row) {
+			row.classList.add("todoCompleting");
+		}
+		Log.info("MMM-Todoist: Closing task " + taskId);
+		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
+			taskId: taskId,
+			accessToken: this.config.accessToken
+		});
+	},
+
+	handleTaskClosed: function (payload) {
+		var taskId = payload.taskId;
+		Log.info("MMM-Todoist: Task " + taskId + " closed successfully.");
+
+		if (this.tasks && this.tasks.items) {
+			this.tasks.items = this.tasks.items.filter(function (item) {
+				return item.id !== taskId;
+			});
+		}
+
+		var self = this;
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row) {
+			row.classList.remove("todoCompleting");
+			row.classList.add("todoCompleted");
+			setTimeout(function () {
+				self.updateDom(500);
+			}, 600);
+		} else {
+			this.updateDom(500);
+		}
+	},
+
+	handleCloseTaskError: function (payload) {
+		Log.error("MMM-Todoist: Failed to close task " + payload.taskId + ": " + payload.error);
+		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		if (row) {
+			row.classList.remove("todoCompleting");
 		}
 	},
 
@@ -654,11 +704,16 @@ Module.register("MMM-Todoist", {
 		}
 
 		//Iterate through Todos
+		var self = this;
 		this.tasks.items.forEach(item => {
 			var divRow = document.createElement("div");
 			//Add the Row
 			divRow.className = "divTableRow";
-			
+			divRow.setAttribute("data-task-id", item.id);
+
+			divRow.addEventListener("click", (function(taskId) {
+				return function() { self.completeTask(taskId); };
+			})(item.id));
 
 			//Columns
 			divRow.appendChild(this.addPriorityIndicatorCell(item));
