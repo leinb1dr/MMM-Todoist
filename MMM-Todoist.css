@@ -106,8 +106,19 @@
 	pointer-events: none;
 }
 
-.divTableRow.todoCompleting .title {
-	text-decoration: line-through;
+.divTableRow.todoCompleting .title,
+.divTableRow.todoComplete .title {
+	text-decoration: line-through !important;
+	text-decoration-thickness: 3px;
+}
+
+.divTableRow.todoComplete .title s {
+	text-decoration-thickness: 3px;
+}
+
+.divTableRow.todoComplete {
+	opacity: 0.8;
+	cursor: default;
 }
 
 .divTableRow.todoCompleted {

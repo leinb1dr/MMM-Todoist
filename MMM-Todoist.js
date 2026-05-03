@@ -54,6 +54,7 @@ Module.register("MMM-Todoist", {
 		displaySubtasks: true, // set to false to exclude subtasks
 		displayAvatar: false,
 		showProject: true,
+		showComplete: false,
 		// projectColors: ["#95ef63", "#ff8581", "#ffc471", "#f9ec75", "#a8c8e4", "#d2b8a3", "#e2a8e4", "#cccccc", "#fb886e",
 		// 	"#ffcc00", "#74e8d3", "#3bd5fb", "#dc4fad", "#ac193d", "#d24726", "#82ba00", "#03b3b2", "#008299",
 		// 	"#5db2ff", "#0072c6", "#000000", "#777777"
@@ -268,9 +269,21 @@ Module.register("MMM-Todoist", {
 		Log.info("MMM-Todoist: Task " + taskId + " closed successfully.");
 
 		if (this.tasks && this.tasks.items) {
+			var closedItem;
 			this.tasks.items = this.tasks.items.filter(function (item) {
-				return item.id !== taskId;
+				if (item.id === taskId) {
+					closedItem = item;
+					return false;
+				}
+				return true;
 			});
+
+			if (this.config.showComplete === true && closedItem) {
+				closedItem.is_completed = true;
+				closedItem.completed_at = new Date().toISOString();
+				this.tasks.items.push(closedItem);
+				this.tasks.items = this.activeItemsFirst(this.tasks.items);
+			}
 		}
 
 		var self = this;
@@ -284,6 +297,14 @@ Module.register("MMM-Todoist", {
 		} else {
 			this.updateDom(500);
 		}
+	},
+
+	activeItemsFirst: function(items) {
+		return items.filter(function(item) {
+			return !item.is_completed;
+		}).concat(items.filter(function(item) {
+			return item.is_completed;
+		}));
 	},
 
 	handleCloseTaskError: function (payload) {
@@ -367,7 +388,10 @@ Module.register("MMM-Todoist", {
 			if (self.config.labels.length > 0 && item.labels.length > 0) {
 					// item.labels contains label IDs. Use mapped labelIds (from tasks.labels) or allow numeric IDs in config.
 					for (let itemLabelId of item.labels) {
-						if (labelIds.includes(itemLabelId) || self.config.labels.includes(itemLabelId) || self.config.labels.includes(String(itemLabelId))) {
+						var itemLabelValue = String(itemLabelId).toLowerCase();
+						if (labelIds.includes(itemLabelId) || self.config.labels.some(function(configLabel) {
+							return String(configLabel).toLowerCase() === itemLabelValue;
+						})) {
 							items.push(item);
 							return;
 						}
@@ -437,7 +461,7 @@ Module.register("MMM-Todoist", {
 		}
 
 		//Slice by max Entries
-		items = sorteditems.slice(0, this.config.maximumEntries);
+		items = this.activeItemsFirst(sorteditems).slice(0, this.config.maximumEntries);
 
 		this.tasks = {
 			"items": items,
@@ -566,8 +590,11 @@ Module.register("MMM-Todoist", {
 			// this item is a subtask so indent it
 			taskText = '- ' + taskText;
 		}
-		return this.createCell("title bright alignLeft", 
-			this.shorten(taskText, this.config.maxTitleLength, this.config.wrapEvents));
+		var displayText = this.shorten(taskText, this.config.maxTitleLength, this.config.wrapEvents);
+		if (item.is_completed) {
+			displayText = "<s>" + displayText + "</s>";
+		}
+		return this.createCell("title bright alignLeft", displayText);
 	},
 	addDueDateCell: function(item) {
 		var className = "bright align-right dueDate ";
@@ -709,11 +736,16 @@ Module.register("MMM-Todoist", {
 			var divRow = document.createElement("div");
 			//Add the Row
 			divRow.className = "divTableRow";
+			if (item.is_completed) {
+				divRow.className += " todoComplete";
+			}
 			divRow.setAttribute("data-task-id", item.id);
 
-			divRow.addEventListener("click", (function(taskId) {
-				return function() { self.completeTask(taskId); };
-			})(item.id));
+			if (!item.is_completed) {
+				divRow.addEventListener("click", (function(taskId) {
+					return function() { self.completeTask(taskId); };
+				})(item.id));
+			}
 
 			//Columns
 			divRow.appendChild(this.addPriorityIndicatorCell(item));

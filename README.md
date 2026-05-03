@@ -23,6 +23,7 @@ modules: [
 			hideWhenEmpty: false,
 			accessToken: 'accessToken from Todoist',
 			maximumEntries: 60,
+			showComplete: true,
 			updateInterval: 10*60*1000, // Update every 10 minutes
 			fade: false,      
 			// projects and/or labels is mandatory:
@@ -113,6 +114,13 @@ The following properties can be configured:
 			<td>Maximum number of todos to be shown.<br>
 				<br><b>Possible values:</b> <code>int</code>
 				<br><b>Default value:</b> <code>10</code>
+			</td>
+		</tr>
+		<tr>
+			<td><code>showComplete</code></td>
+			<td>Show tasks completed today below active tasks, crossed off.<br>
+				<br><b>Possible values:</b> <code>boolean</code>
+				<br><b>Default value:</b> <code>false</code>
 			</td>
 		</tr>
 		<tr>
