@@ -88,6 +88,7 @@ Module.register("MMM-Todoist", {
 		apiVersion: "v1",
 		apiBase: "https://api.todoist.com/api",
 		todoistEndpoint: "sync",
+		completedTodoistEndpoint: "tasks/completed/by_completion_date",
 
 		todoistResourceType: "[\"items\", \"projects\", \"collaborators\", \"user\", \"labels\"]",
 
@@ -424,7 +425,7 @@ Module.register("MMM-Todoist", {
 			}
 
 			// Filter using label if a label is configured
-			if (self.config.labels.length > 0 && item.labels.length > 0) {
+			if (self.config.labels.length > 0 && item.labels && item.labels.length > 0) {
 					// item.labels contains label IDs. Use mapped labelIds (from tasks.labels) or allow numeric IDs in config.
 					for (let itemLabelId of item.labels) {
 						var itemLabelValue = String(itemLabelId).toLowerCase();
@@ -771,12 +772,15 @@ Module.register("MMM-Todoist", {
 
 		//Iterate through Todos
 		var self = this;
-		this.tasks.items.forEach(item => {
+		this.tasks.items.forEach((item, index) => {
 			var divRow = document.createElement("div");
 			//Add the Row
 			divRow.className = "divTableRow";
 			if (item.is_completed) {
 				divRow.className += " todoComplete";
+				if (index > 0 && !this.tasks.items[index - 1].is_completed) {
+					divRow.className += " todoCompletedSectionStart";
+				}
 			}
 			divRow.setAttribute("data-task-id", item.id);
 

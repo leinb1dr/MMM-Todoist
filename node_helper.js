@@ -131,6 +131,87 @@ module.exports = NodeHelper.create({
 		});
 	},
 
+	getTodayCompletionRange: function() {
+		var now = new Date();
+		var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		var end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+		return {
+			since: start.toISOString(),
+			until: end.toISOString()
+		};
+	},
+
+	getCompletedTodosUrl: function() {
+		return this.config.apiBase + "/" + this.config.apiVersion + "/" + this.config.completedTodoistEndpoint;
+	},
+
+	fetchCompletedTodosToday: function(accessCode) {
+		var self = this;
+		var completionRange = self.getTodayCompletionRange();
+		var completedItems = [];
+
+		var fetchPage = function(cursor) {
+			var requestParams = {
+				since: completionRange.since,
+				until: completionRange.until
+			};
+
+			if (cursor) {
+				requestParams.cursor = cursor;
+			}
+
+			return axios.get(self.getCompletedTodosUrl(), {
+				headers: {
+					"cache-control": "no-cache",
+					"Authorization": "Bearer " + accessCode
+				},
+				params: requestParams
+			})
+			.then(function(response) {
+				if (self.config.debug) {
+					console.log("MMM-Todoist Completed API Response:", JSON.stringify(response.data, null, 2));
+				}
+
+				if (response.status !== 200 || !response.data || !Array.isArray(response.data.items)) {
+					throw new Error("Invalid completed tasks response");
+				}
+
+				completedItems = completedItems.concat(response.data.items);
+				if (response.data.next_cursor) {
+					return fetchPage(response.data.next_cursor);
+				}
+
+				return completedItems.map(function(item) {
+					item.is_completed = true;
+					item.checked = true;
+					if (!item.completed_at) {
+						item.completed_at = completionRange.since;
+					}
+					return item;
+				});
+			});
+		};
+
+		return fetchPage();
+	},
+
+	mergeCompletedTodos: function(taskJson, completedItems) {
+		var itemsById = {};
+
+		taskJson.items.forEach(function(item) {
+			itemsById[item.id] = item;
+		});
+
+		completedItems.forEach(function(item) {
+			itemsById[item.id] = item;
+		});
+
+		taskJson.items = Object.keys(itemsById).map(function(id) {
+			return itemsById[id];
+		});
+	},
+
 	fetchTodos : function() {
 		var self = this;
 		var accessCode = self.config.accessToken;
@@ -177,9 +258,24 @@ module.exports = NodeHelper.create({
 					return;
 				}
 
-				self.addContentHtml(taskJson.items);
-				taskJson.accessToken = accessCode;
-				self.sendSocketNotification("TASKS", taskJson);
+				var sendTasks = function() {
+					self.addContentHtml(taskJson.items);
+					taskJson.accessToken = accessCode;
+					self.sendSocketNotification("TASKS", taskJson);
+				};
+
+				if (self.config.showComplete === true) {
+					self.fetchCompletedTodosToday(accessCode)
+						.then(function(completedItems) {
+							self.mergeCompletedTodos(taskJson, completedItems);
+							sendTasks();
+						})
+						.catch(function(error) {
+							self.handleFetchError(error);
+						});
+				} else {
+					sendTasks();
+				}
 			} else {
 				console.error("MMM-Todoist: Unexpected response status: " + response.status);
 				self.sendSocketNotification("FETCH_ERROR", {

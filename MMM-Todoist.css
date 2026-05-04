@@ -121,6 +121,11 @@
 	cursor: default;
 }
 
+.divTableRow.todoCompletedSectionStart .title {
+	border-top: 2px solid rgba(180, 180, 180, 0.9);
+	padding-top: 8px;
+}
+
 .divTableRow.todoCompleted {
 	opacity: 0;
 	pointer-events: none;
