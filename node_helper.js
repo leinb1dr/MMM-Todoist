@@ -39,17 +39,41 @@ module.exports = NodeHelper.create({
 			this.fetchTodos();
 		} else if (notification === "TODOIST_CLOSE_TASK") {
 			this.closeTask(payload);
+		} else if (notification === "TODOIST_UNCOMPLETE_TASK") {
+			this.uncompleteTask(payload);
 		}
 	},
 
 	closeTask: function(payload) {
+		this.sendTaskCommand(payload, {
+			commandType: "item_complete",
+			actionName: "close",
+			actionPastTense: "closed",
+			actionGerund: "closing",
+			successNotification: "TASK_CLOSED",
+			errorNotification: "CLOSE_TASK_ERROR"
+		});
+	},
+
+	uncompleteTask: function(payload) {
+		this.sendTaskCommand(payload, {
+			commandType: "item_uncomplete",
+			actionName: "uncomplete",
+			actionPastTense: "uncompleted",
+			actionGerund: "uncompleting",
+			successNotification: "TASK_UNCOMPLETED",
+			errorNotification: "UNCOMPLETE_TASK_ERROR"
+		});
+	},
+
+	sendTaskCommand: function(payload, options) {
 		var self = this;
 		var taskId = payload.taskId;
 		var accessToken = payload.accessToken;
 
 		if (!axios) {
-			console.error("MMM-Todoist: axios is not available. Cannot close task.");
-			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+			console.error("MMM-Todoist: axios is not available. Cannot " + options.actionName + " task.");
+			self.sendSocketNotification(options.errorNotification, {
 				taskId: taskId,
 				error: "Missing dependency: axios"
 			});
@@ -57,8 +81,8 @@ module.exports = NodeHelper.create({
 		}
 
 		if (!accessToken) {
-			console.error("MMM-Todoist: AccessToken not set, cannot close task.");
-			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+			console.error("MMM-Todoist: AccessToken not set, cannot " + options.actionName + " task.");
+			self.sendSocketNotification(options.errorNotification, {
 				taskId: taskId,
 				error: "AccessToken not configured"
 			});
@@ -66,7 +90,7 @@ module.exports = NodeHelper.create({
 		}
 
 		var command = {
-			type: "item_complete",
+			type: options.commandType,
 			uuid: crypto.randomUUID(),
 			args: {
 				id: taskId
@@ -88,22 +112,22 @@ module.exports = NodeHelper.create({
 				throw new Error("Sync command failed: " + JSON.stringify(response.data && response.data.sync_status));
 			}
 
-			console.log("MMM-Todoist: Task " + taskId + " closed successfully.");
-			self.sendSocketNotification("TASK_CLOSED", { taskId: taskId });
+			console.log("MMM-Todoist: Task " + taskId + " " + options.actionPastTense + " successfully.");
+			self.sendSocketNotification(options.successNotification, { taskId: taskId });
 		})
 		.catch(function(error) {
 			var errorMessage = "Unknown error";
 			if (error.response) {
 				errorMessage = "API Error: " + error.response.status;
-				console.error("MMM-Todoist: Failed to close task " + taskId + ":", error.response.status, error.response.data);
+				console.error("MMM-Todoist: Failed to " + options.actionName + " task " + taskId + ":", error.response.status, error.response.data);
 			} else if (error.request) {
 				errorMessage = "No response from Todoist API: " + error.message;
-				console.error("MMM-Todoist: No response closing task " + taskId + ":", error.message);
+				console.error("MMM-Todoist: No response " + options.actionGerund + " task " + taskId + ":", error.message);
 			} else {
 				errorMessage = "Request error: " + error.message;
-				console.error("MMM-Todoist: Error closing task " + taskId + ":", error.message);
+				console.error("MMM-Todoist: Error " + options.actionGerund + " task " + taskId + ":", error.message);
 			}
-			self.sendSocketNotification("CLOSE_TASK_ERROR", {
+			self.sendSocketNotification(options.errorNotification, {
 				taskId: taskId,
 				error: errorMessage
 			});

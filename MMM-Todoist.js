@@ -247,12 +247,16 @@ Module.register("MMM-Todoist", {
 			this.handleTaskClosed(payload);
 		} else if (notification === "CLOSE_TASK_ERROR") {
 			this.handleCloseTaskError(payload);
+		} else if (notification === "TASK_UNCOMPLETED") {
+			this.handleTaskUncompleted(payload);
+		} else if (notification === "UNCOMPLETE_TASK_ERROR") {
+			this.handleUncompleteTaskError(payload);
 		}
 	},
 
 	completeTask: function (taskId) {
 		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
-		if (row && row.classList.contains("todoCompleting")) {
+		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
 			return;
 		}
 		if (row) {
@@ -260,6 +264,21 @@ Module.register("MMM-Todoist", {
 		}
 		Log.info("MMM-Todoist: Closing task " + taskId);
 		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
+			taskId: taskId,
+			accessToken: this.config.accessToken
+		});
+	},
+
+	uncompleteTask: function (taskId) {
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
+			return;
+		}
+		if (row) {
+			row.classList.add("todoUncompleting");
+		}
+		Log.info("MMM-Todoist: Uncompleting task " + taskId);
+		this.sendSocketNotification("TODOIST_UNCOMPLETE_TASK", {
 			taskId: taskId,
 			accessToken: this.config.accessToken
 		});
@@ -300,6 +319,31 @@ Module.register("MMM-Todoist", {
 		}
 	},
 
+	handleTaskUncompleted: function (payload) {
+		var taskId = payload.taskId;
+		Log.info("MMM-Todoist: Task " + taskId + " uncompleted successfully.");
+
+		if (this.tasks && this.tasks.items) {
+			this.tasks.items.forEach(function (item) {
+				if (item.id === taskId) {
+					item.is_completed = false;
+					item.checked = false;
+					item.completed_at = null;
+					item.completed_date = null;
+					item.completedAt = null;
+				}
+			});
+			this.tasks.items = this.activeItemsFirst(this.tasks.items);
+		}
+
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row) {
+			row.classList.remove("todoUncompleting");
+			row.classList.remove("todoComplete");
+		}
+		this.updateDom(500);
+	},
+
 	activeItemsFirst: function(items) {
 		return items.filter(function(item) {
 			return !item.is_completed;
@@ -338,6 +382,14 @@ Module.register("MMM-Todoist", {
 		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
 		if (row) {
 			row.classList.remove("todoCompleting");
+		}
+	},
+
+	handleUncompleteTaskError: function (payload) {
+		Log.error("MMM-Todoist: Failed to uncomplete task " + payload.taskId + ": " + payload.error);
+		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		if (row) {
+			row.classList.remove("todoUncompleting");
 		}
 	},
 
@@ -784,11 +836,15 @@ Module.register("MMM-Todoist", {
 			}
 			divRow.setAttribute("data-task-id", item.id);
 
-			if (!item.is_completed) {
-				divRow.addEventListener("click", (function(taskId) {
-					return function() { self.completeTask(taskId); };
-				})(item.id));
-			}
+			divRow.addEventListener("click", (function(taskId, isCompleted) {
+				return function() {
+					if (isCompleted) {
+						self.uncompleteTask(taskId);
+					} else {
+						self.completeTask(taskId);
+					}
+				};
+			})(item.id, item.is_completed));
 
 			//Columns
 			divRow.appendChild(this.addPriorityIndicatorCell(item));
