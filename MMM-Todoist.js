@@ -772,12 +772,15 @@ Module.register("MMM-Todoist", {
 
 		//Iterate through Todos
 		var self = this;
-		this.tasks.items.forEach(item => {
+		this.tasks.items.forEach((item, index) => {
 			var divRow = document.createElement("div");
 			//Add the Row
 			divRow.className = "divTableRow";
 			if (item.is_completed) {
 				divRow.className += " todoComplete";
+				if (index > 0 && !this.tasks.items[index - 1].is_completed) {
+					divRow.className += " todoCompletedSectionStart";
+				}
 			}
 			divRow.setAttribute("data-task-id", item.id);
 
