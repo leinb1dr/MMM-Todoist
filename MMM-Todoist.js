@@ -254,6 +254,20 @@ Module.register("MMM-Todoist", {
 		}
 	},
 
+	getTaskById: function(taskId) {
+		if (!this.tasks || !this.tasks.items) {
+			return null;
+		}
+
+		return this.tasks.items.find(function(item) {
+			return String(item.id) === String(taskId);
+		}) || null;
+	},
+
+	isRecurringTask: function(item) {
+		return !!(item && item.due && (item.due.is_recurring === true || item.due.is_recurring === 1));
+	},
+
 	completeTask: function (taskId) {
 		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
 		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
@@ -262,10 +276,22 @@ Module.register("MMM-Todoist", {
 		if (row) {
 			row.classList.add("todoCompleting");
 		}
-		Log.info("MMM-Todoist: Closing task " + taskId);
-		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
+		var task = this.getTaskById(taskId);
+		var isRecurring = this.isRecurringTask(task);
+		var payload = {
 			taskId: taskId,
-			accessToken: this.config.accessToken
+			accessToken: this.config.accessToken,
+			isRecurring: isRecurring
+		};
+		if (isRecurring) {
+			payload.due = task.due;
+		}
+		Log.info("MMM-Todoist: " + (isRecurring ? "Completing recurring task " : "Closing task ") + taskId);
+		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
+			taskId: payload.taskId,
+			accessToken: payload.accessToken,
+			isRecurring: payload.isRecurring,
+			due: payload.due
 		});
 	},
 
@@ -286,12 +312,22 @@ Module.register("MMM-Todoist", {
 
 	handleTaskClosed: function (payload) {
 		var taskId = payload.taskId;
-		Log.info("MMM-Todoist: Task " + taskId + " closed successfully.");
+		var isRecurring = payload.isRecurring === true;
+		Log.info("MMM-Todoist: Task " + taskId + (isRecurring ? " completed as recurring" : " closed") + " successfully.");
+
+		if (isRecurring) {
+			var recurringRow = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+			if (recurringRow) {
+				recurringRow.classList.remove("todoCompleting");
+			}
+			this.sendSocketNotification("FETCH_TODOIST", this.config);
+			return;
+		}
 
 		if (this.tasks && this.tasks.items) {
 			var closedItem;
 			this.tasks.items = this.tasks.items.filter(function (item) {
-				if (item.id === taskId) {
+				if (String(item.id) === String(taskId)) {
 					closedItem = item;
 					return false;
 				}
@@ -512,7 +548,7 @@ Module.register("MMM-Todoist", {
 
 		//Used for ordering by date
 		items.forEach(function (item) {
-			if (item.due === null) {
+			if (!item.due || !item.due.date) {
 				item.due = {};
 				item.due["date"] = "2100-12-31";
 				item.all_day = true;
@@ -691,6 +727,10 @@ Module.register("MMM-Todoist", {
 	addDueDateCell: function(item) {
 		var className = "bright align-right dueDate ";
 		var innerHTML = "";
+
+		if (item.is_completed || !item.due || !item.due.date) {
+			return this.createCell(className + "xsmall", innerHTML);
+		}
 		
 		var oneDay = 24 * 60 * 60 * 1000;
 		var dueDateTime = this.parseDueDate(item.due.date);
