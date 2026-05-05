@@ -46,7 +46,7 @@ module.exports = NodeHelper.create({
 
 	closeTask: function(payload) {
 		this.sendTaskCommand(payload, {
-			commandType: payload.isRecurring ? "item_close" : "item_complete",
+			commandType: payload.isRecurring ? "item_update_date_complete" : "item_complete",
 			actionName: "close",
 			actionPastTense: "closed",
 			actionGerund: "closing",
@@ -96,6 +96,10 @@ module.exports = NodeHelper.create({
 				id: taskId
 			}
 		};
+		if (payload.isRecurring) {
+			command.args.is_forward = 1;
+			command.args.reset_subtasks = 0;
+		}
 		var url = (this.config && this.config.apiBase ? this.config.apiBase : "https://api.todoist.com/api") +
 			"/" + (this.config && this.config.apiVersion ? this.config.apiVersion : "v1") + "/sync";
 		var params = new URLSearchParams();
