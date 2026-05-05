@@ -283,15 +283,11 @@ Module.register("MMM-Todoist", {
 			accessToken: this.config.accessToken,
 			isRecurring: isRecurring
 		};
-		if (isRecurring) {
-			payload.due = task.due;
-		}
 		Log.info("MMM-Todoist: " + (isRecurring ? "Completing recurring task " : "Closing task ") + taskId);
 		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
 			taskId: payload.taskId,
 			accessToken: payload.accessToken,
-			isRecurring: payload.isRecurring,
-			due: payload.due
+			isRecurring: payload.isRecurring
 		});
 	},
 

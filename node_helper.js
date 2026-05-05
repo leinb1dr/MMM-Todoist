@@ -97,7 +97,6 @@ module.exports = NodeHelper.create({
 			}
 		};
 		if (payload.isRecurring) {
-			command.args.due = payload.due;
 			command.args.is_forward = 1;
 			command.args.reset_subtasks = 0;
 		}
