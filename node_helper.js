@@ -41,6 +41,8 @@ module.exports = NodeHelper.create({
 			this.closeTask(payload);
 		} else if (notification === "TODOIST_UNCOMPLETE_TASK") {
 			this.uncompleteTask(payload);
+		} else if (notification === "TODOIST_BATCH_UPDATE") {
+			this.batchUpdateTasks(payload);
 		}
 	},
 
@@ -63,6 +65,101 @@ module.exports = NodeHelper.create({
 			actionGerund: "uncompleting",
 			successNotification: "TASK_UNCOMPLETED",
 			errorNotification: "UNCOMPLETE_TASK_ERROR"
+		});
+	},
+
+	buildTaskCommand: function(update) {
+		var command = {
+			type: update.action === "uncomplete" ? "item_uncomplete" :
+				(update.isRecurring ? "item_update_date_complete" : "item_complete"),
+			uuid: crypto.randomUUID(),
+			args: {
+				id: update.taskId
+			}
+		};
+
+		if (update.action === "complete" && update.isRecurring) {
+			command.args.is_forward = 1;
+			command.args.reset_subtasks = 0;
+		}
+
+		return command;
+	},
+
+	batchUpdateTasks: function(payload) {
+		var self = this;
+		var accessToken = payload.accessToken;
+		var updates = Array.isArray(payload.updates) ? payload.updates : [];
+
+		if (!axios) {
+			console.error("MMM-Todoist: axios is not available. Cannot batch update tasks.");
+			self.sendSocketNotification("BATCH_UPDATE_ERROR", {
+				error: "Missing dependency: axios",
+				updates: updates
+			});
+			return;
+		}
+
+		if (!accessToken) {
+			console.error("MMM-Todoist: AccessToken not set, cannot batch update tasks.");
+			self.sendSocketNotification("BATCH_UPDATE_ERROR", {
+				error: "AccessToken not configured",
+				updates: updates
+			});
+			return;
+		}
+
+		if (updates.length === 0) {
+			self.sendSocketNotification("BATCH_UPDATE_SUCCESS", {
+				updates: []
+			});
+			return;
+		}
+
+		var commands = updates.map(function(update) {
+			return self.buildTaskCommand(update);
+		});
+		var commandUuids = commands.map(function(command) {
+			return command.uuid;
+		});
+
+		var url = (this.config && this.config.apiBase ? this.config.apiBase : "https://api.todoist.com/api") +
+			"/" + (this.config && this.config.apiVersion ? this.config.apiVersion : "v1") + "/sync";
+		var params = new URLSearchParams();
+		params.append("commands", JSON.stringify(commands));
+
+		axios.post(url, params.toString(), {
+			headers: {
+				"content-type": "application/x-www-form-urlencoded",
+				"Authorization": "Bearer " + accessToken
+			}
+		})
+		.then(function(response) {
+			if (!self.syncCommandsSucceeded(response.data, commandUuids)) {
+				throw new Error("Sync command failed: " + JSON.stringify(response.data && response.data.sync_status));
+			}
+
+			console.log("MMM-Todoist: Batch updated " + updates.length + " task(s) successfully.");
+			self.sendSocketNotification("BATCH_UPDATE_SUCCESS", {
+				updates: updates
+			});
+		})
+		.catch(function(error) {
+			var errorMessage = "Unknown error";
+			if (error.response) {
+				errorMessage = "API Error: " + error.response.status;
+				console.error("MMM-Todoist: Failed to batch update tasks:", error.response.status, error.response.data);
+			} else if (error.request) {
+				errorMessage = "No response from Todoist API: " + error.message;
+				console.error("MMM-Todoist: No response batch updating tasks:", error.message);
+			} else {
+				errorMessage = "Request error: " + error.message;
+				console.error("MMM-Todoist: Error batch updating tasks:", error.message);
+			}
+			self.sendSocketNotification("BATCH_UPDATE_ERROR", {
+				error: errorMessage,
+				updates: updates
+			});
 		});
 	},
 
@@ -89,17 +186,11 @@ module.exports = NodeHelper.create({
 			return;
 		}
 
-		var command = {
-			type: options.commandType,
-			uuid: crypto.randomUUID(),
-			args: {
-				id: taskId
-			}
-		};
-		if (payload.isRecurring) {
-			command.args.is_forward = 1;
-			command.args.reset_subtasks = 0;
-		}
+		var command = this.buildTaskCommand({
+			taskId: taskId,
+			action: options.commandType === "item_uncomplete" ? "uncomplete" : "complete",
+			isRecurring: payload.isRecurring === true
+		});
 		var url = (this.config && this.config.apiBase ? this.config.apiBase : "https://api.todoist.com/api") +
 			"/" + (this.config && this.config.apiVersion ? this.config.apiVersion : "v1") + "/sync";
 		var params = new URLSearchParams();
@@ -112,7 +203,7 @@ module.exports = NodeHelper.create({
 			}
 		})
 		.then(function(response) {
-			if (!self.syncCommandSucceeded(response.data, command.uuid)) {
+			if (!self.syncCommandsSucceeded(response.data, [command.uuid])) {
 				throw new Error("Sync command failed: " + JSON.stringify(response.data && response.data.sync_status));
 			}
 
@@ -142,7 +233,17 @@ module.exports = NodeHelper.create({
 	},
 
 	syncCommandSucceeded: function(data, commandUuid) {
-		return data && data.sync_status && data.sync_status[commandUuid] === "ok";
+		return this.syncCommandsSucceeded(data, [commandUuid]);
+	},
+
+	syncCommandsSucceeded: function(data, commandUuids) {
+		if (!data || !data.sync_status || !Array.isArray(commandUuids) || commandUuids.length === 0) {
+			return false;
+		}
+
+		return commandUuids.every(function(commandUuid) {
+			return data.sync_status[commandUuid] === "ok";
+		});
 	},
 
 	addContentHtml: function(items) {
