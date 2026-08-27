@@ -74,8 +74,8 @@
 .divTableCell, .divTableHead {
 	/* border: 1px solid #999999; */
 	display: table-cell;
-	/* Modest padding for easier touch targets (less than prior 16px attempt) */
-	padding: 8px 10px;
+	/* Modest padding for easier touch (slightly less than the reverted 16px) */
+	padding: 12px 10px;
 	vertical-align: middle;
 }
 
