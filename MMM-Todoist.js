@@ -55,7 +55,6 @@ Module.register("MMM-Todoist", {
 		displayAvatar: false,
 		showProject: true,
 		showComplete: false,
-		batchUpdateDelay: 30 * 1000, // debounce task complete/uncomplete updates
 		// projectColors: ["#95ef63", "#ff8581", "#ffc471", "#f9ec75", "#a8c8e4", "#d2b8a3", "#e2a8e4", "#cccccc", "#fb886e",
 		// 	"#ffcc00", "#74e8d3", "#3bd5fb", "#dc4fad", "#ac193d", "#d24726", "#82ba00", "#03b3b2", "#008299",
 		// 	"#5db2ff", "#0072c6", "#000000", "#777777"
@@ -114,9 +113,6 @@ Module.register("MMM-Todoist", {
 
 		this.updateIntervalID = 0; // Definition of the IntervalID to be able to stop and start it again
 		this.ModuleToDoIstHidden = false; // by default it is considered displayed. Note : core function "this.hidden" has strange behaviour, so not used here
-		this.pendingTaskUpdates = {}; // taskId -> { originalCompleted, desiredCompleted, isRecurring }
-		this.pendingUpdateTimer = null;
-		this.batchUpdateInFlight = false;
 
 		//to display "Loading..." at start-up
 		this.title = "Loading...";
@@ -142,9 +138,6 @@ Module.register("MMM-Todoist", {
 
 		//add ID to the setInterval function to be able to stop it later on
 		this.updateIntervalID = setInterval(function () {
-			if (self.hasPendingTaskUpdates() || self.batchUpdateInFlight) {
-				return;
-			}
 			self.sendSocketNotification("FETCH_TODOIST", self.config);
 		}, this.config.updateInterval);
 	},
@@ -173,18 +166,13 @@ Module.register("MMM-Todoist", {
 		if (UserPresence === true && this.ModuleToDoIstHidden === false) {
 			var self = this;
 
-			// update now unless a batched edit is waiting/sending
-			if (!this.hasPendingTaskUpdates() && !this.batchUpdateInFlight) {
-				this.sendSocketNotification("FETCH_TODOIST", this.config);
-			}
+			// update now
+			this.sendSocketNotification("FETCH_TODOIST", this.config);
 
 			//if no IntervalID defined, we set one again. This is to avoid several setInterval simultaneously
 			if (this.updateIntervalID === 0) {
 
 				this.updateIntervalID = setInterval(function () {
-					if (self.hasPendingTaskUpdates() || self.batchUpdateInFlight) {
-						return;
-					}
 					self.sendSocketNotification("FETCH_TODOIST", self.config);
 				}, this.config.updateInterval);
 			}
@@ -245,7 +233,6 @@ Module.register("MMM-Todoist", {
 	socketNotificationReceived: function (notification, payload) {
 		if (notification === "TASKS") {
 			this.filterTodoistData(payload);
-			this.applyPendingUpdatesToTasks();
 
 			if (this.config.displayLastUpdate) {
 				this.lastUpdate = Date.now() / 1000; //save the timestamp of the last update to be able to display it
@@ -256,10 +243,14 @@ Module.register("MMM-Todoist", {
 			this.updateDom(1000);
 		} else if (notification === "FETCH_ERROR") {
 			Log.error("Todoist Error. Could not fetch todos: " + payload.error);
-		} else if (notification === "BATCH_UPDATE_SUCCESS") {
-			this.handleBatchUpdateSuccess(payload);
-		} else if (notification === "BATCH_UPDATE_ERROR") {
-			this.handleBatchUpdateError(payload);
+		} else if (notification === "TASK_CLOSED") {
+			this.handleTaskClosed(payload);
+		} else if (notification === "CLOSE_TASK_ERROR") {
+			this.handleCloseTaskError(payload);
+		} else if (notification === "TASK_UNCOMPLETED") {
+			this.handleTaskUncompleted(payload);
+		} else if (notification === "UNCOMPLETE_TASK_ERROR") {
+			this.handleUncompleteTaskError(payload);
 		}
 	},
 
@@ -277,205 +268,112 @@ Module.register("MMM-Todoist", {
 		return !!(item && item.due && (item.due.is_recurring === true || item.due.is_recurring === 1));
 	},
 
-	hasPendingTaskUpdates: function () {
-		return Object.keys(this.pendingTaskUpdates).length > 0;
-	},
-
-	schedulePendingUpdates: function () {
-		var self = this;
-		if (this.pendingUpdateTimer) {
-			clearTimeout(this.pendingUpdateTimer);
-			this.pendingUpdateTimer = null;
-		}
-
-		if (!this.hasPendingTaskUpdates()) {
-			return;
-		}
-
-		var delay = typeof this.config.batchUpdateDelay === "number" ? this.config.batchUpdateDelay : 30000;
-		this.pendingUpdateTimer = setTimeout(function () {
-			self.pendingUpdateTimer = null;
-			self.flushPendingUpdates();
-		}, delay);
-	},
-
-	buildPendingUpdatePayload: function () {
-		var updates = [];
-		var taskIds = Object.keys(this.pendingTaskUpdates);
-
-		for (var i = 0; i < taskIds.length; i++) {
-			var taskId = taskIds[i];
-			var pending = this.pendingTaskUpdates[taskId];
-			if (!pending || pending.desiredCompleted === pending.originalCompleted) {
-				continue;
-			}
-
-			updates.push({
-				taskId: taskId,
-				action: pending.desiredCompleted ? "complete" : "uncomplete",
-				isRecurring: pending.isRecurring === true
-			});
-		}
-
-		return updates;
-	},
-
-	flushPendingUpdates: function () {
-		if (this.batchUpdateInFlight) {
-			return;
-		}
-
-		var updates = this.buildPendingUpdatePayload();
-		if (updates.length === 0) {
-			this.pendingTaskUpdates = {};
-			return;
-		}
-
-		this.batchUpdateInFlight = true;
-		Log.info("MMM-Todoist: Sending batch of " + updates.length + " task update(s).");
-		this.sendSocketNotification("TODOIST_BATCH_UPDATE", {
-			accessToken: this.config.accessToken,
-			updates: updates
-		});
-	},
-
-	applyOptimisticCompletion: function (taskId, shouldComplete, options) {
-		if (!this.tasks || !this.tasks.items) {
-			return;
-		}
-
-		var item = this.getTaskById(taskId);
-		if (!item) {
-			return;
-		}
-
-		if (shouldComplete) {
-			item.is_completed = true;
-			item.checked = true;
-			item.completed_at = new Date().toISOString();
-		} else {
-			item.is_completed = false;
-			item.checked = false;
-			item.completed_at = null;
-			item.completed_date = null;
-			item.completedAt = null;
-		}
-
-		this.tasks.items = this.activeItemsFirst(this.tasks.items);
-		if (!options || options.updateDom !== false) {
-			this.updateDom(200);
-		}
-	},
-
-	queueTaskUpdate: function (taskId, shouldComplete) {
-		if (this.batchUpdateInFlight) {
-			Log.info("MMM-Todoist: Ignoring tap while a batch update is in flight.");
-			return;
-		}
-
-		var task = this.getTaskById(taskId);
-		if (!task) {
-			return;
-		}
-
-		var currentlyCompleted = this.isCompletedItem(task);
-		if (currentlyCompleted === shouldComplete) {
-			return;
-		}
-
-		var pending = this.pendingTaskUpdates[taskId];
-		if (!pending) {
-			pending = {
-				originalCompleted: currentlyCompleted,
-				isRecurring: this.isRecurringTask(task)
-			};
-			this.pendingTaskUpdates[taskId] = pending;
-		}
-
-		pending.desiredCompleted = shouldComplete;
-
-		if (pending.desiredCompleted === pending.originalCompleted) {
-			delete this.pendingTaskUpdates[taskId];
-		}
-
-		this.applyOptimisticCompletion(taskId, shouldComplete);
-		this.schedulePendingUpdates();
-
-		Log.info("MMM-Todoist: Queued " + (shouldComplete ? "complete" : "uncomplete") +
-			" for task " + taskId + " (" + Object.keys(this.pendingTaskUpdates).length + " pending).");
-	},
-
 	completeTask: function (taskId) {
-		this.queueTaskUpdate(taskId, true);
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
+			return;
+		}
+		if (row) {
+			row.classList.add("todoCompleting");
+		}
+		var task = this.getTaskById(taskId);
+		var isRecurring = this.isRecurringTask(task);
+		var payload = {
+			taskId: taskId,
+			accessToken: this.config.accessToken,
+			isRecurring: isRecurring
+		};
+		Log.info("MMM-Todoist: " + (isRecurring ? "Completing recurring task " : "Closing task ") + taskId);
+		this.sendSocketNotification("TODOIST_CLOSE_TASK", {
+			taskId: payload.taskId,
+			accessToken: payload.accessToken,
+			isRecurring: payload.isRecurring
+		});
 	},
 
 	uncompleteTask: function (taskId) {
-		this.queueTaskUpdate(taskId, false);
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
+			return;
+		}
+		if (row) {
+			row.classList.add("todoUncompleting");
+		}
+		Log.info("MMM-Todoist: Uncompleting task " + taskId);
+		this.sendSocketNotification("TODOIST_UNCOMPLETE_TASK", {
+			taskId: taskId,
+			accessToken: this.config.accessToken
+		});
 	},
 
-	applyPendingUpdatesToTasks: function () {
-		var self = this;
-		var taskIds = Object.keys(this.pendingTaskUpdates);
-		if (taskIds.length === 0 || !this.tasks || !this.tasks.items) {
+	handleTaskClosed: function (payload) {
+		var taskId = payload.taskId;
+		var isRecurring = payload.isRecurring === true;
+		Log.info("MMM-Todoist: Task " + taskId + (isRecurring ? " completed as recurring" : " closed") + " successfully.");
+
+		if (isRecurring) {
+			var recurringRow = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+			if (recurringRow) {
+				recurringRow.classList.remove("todoCompleting");
+			}
+			this.sendSocketNotification("FETCH_TODOIST", this.config);
 			return;
 		}
 
-		taskIds.forEach(function (taskId) {
-			var pending = self.pendingTaskUpdates[taskId];
-			var item = self.getTaskById(taskId);
-			if (!pending || !item) {
-				return;
-			}
-
-			if (pending.desiredCompleted) {
-				item.is_completed = true;
-				item.checked = true;
-				if (!item.completed_at) {
-					item.completed_at = new Date().toISOString();
+		if (this.tasks && this.tasks.items) {
+			var closedItem;
+			this.tasks.items = this.tasks.items.filter(function (item) {
+				if (String(item.id) === String(taskId)) {
+					closedItem = item;
+					return false;
 				}
-			} else {
-				item.is_completed = false;
-				item.checked = false;
-				item.completed_at = null;
-				item.completed_date = null;
-				item.completedAt = null;
+				return true;
+			});
+
+			if (this.config.showComplete === true && closedItem) {
+				closedItem.is_completed = true;
+				closedItem.completed_at = new Date().toISOString();
+				this.tasks.items.push(closedItem);
+				this.tasks.items = this.activeItemsFirst(this.tasks.items);
 			}
-		});
-
-		this.tasks.items = this.activeItemsFirst(this.tasks.items);
-	},
-
-	handleBatchUpdateSuccess: function (payload) {
-		var updateCount = payload && payload.updates ? payload.updates.length : 0;
-		Log.info("MMM-Todoist: Batch update succeeded for " + updateCount + " task(s). Refreshing.");
-		this.batchUpdateInFlight = false;
-		this.pendingTaskUpdates = {};
-		if (this.pendingUpdateTimer) {
-			clearTimeout(this.pendingUpdateTimer);
-			this.pendingUpdateTimer = null;
 		}
-		this.sendSocketNotification("FETCH_TODOIST", this.config);
-	},
 
-	handleBatchUpdateError: function (payload) {
 		var self = this;
-		Log.error("MMM-Todoist: Batch update failed: " + (payload && payload.error ? payload.error : "Unknown error"));
-		this.batchUpdateInFlight = false;
-
-		Object.keys(this.pendingTaskUpdates).forEach(function (taskId) {
-			var pending = self.pendingTaskUpdates[taskId];
-			if (!pending) {
-				return;
-			}
-			self.applyOptimisticCompletion(taskId, pending.originalCompleted, { updateDom: false });
-		});
-
-		this.pendingTaskUpdates = {};
-		if (this.pendingUpdateTimer) {
-			clearTimeout(this.pendingUpdateTimer);
-			this.pendingUpdateTimer = null;
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row) {
+			row.classList.remove("todoCompleting");
+			row.classList.add("todoCompleted");
+			setTimeout(function () {
+				self.updateDom(500);
+			}, 600);
+		} else {
+			this.updateDom(500);
 		}
-		this.updateDom(200);
+	},
+
+	handleTaskUncompleted: function (payload) {
+		var taskId = payload.taskId;
+		Log.info("MMM-Todoist: Task " + taskId + " uncompleted successfully.");
+
+		if (this.tasks && this.tasks.items) {
+			this.tasks.items.forEach(function (item) {
+				if (item.id === taskId) {
+					item.is_completed = false;
+					item.checked = false;
+					item.completed_at = null;
+					item.completed_date = null;
+					item.completedAt = null;
+				}
+			});
+			this.tasks.items = this.activeItemsFirst(this.tasks.items);
+		}
+
+		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		if (row) {
+			row.classList.remove("todoUncompleting");
+			row.classList.remove("todoComplete");
+		}
+		this.updateDom(500);
 	},
 
 	activeItemsFirst: function(items) {
@@ -509,6 +407,22 @@ Module.register("MMM-Todoist", {
 		return completedDate.getFullYear() === today.getFullYear() &&
 			completedDate.getMonth() === today.getMonth() &&
 			completedDate.getDate() === today.getDate();
+	},
+
+	handleCloseTaskError: function (payload) {
+		Log.error("MMM-Todoist: Failed to close task " + payload.taskId + ": " + payload.error);
+		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		if (row) {
+			row.classList.remove("todoCompleting");
+		}
+	},
+
+	handleUncompleteTaskError: function (payload) {
+		Log.error("MMM-Todoist: Failed to uncomplete task " + payload.taskId + ": " + payload.error);
+		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		if (row) {
+			row.classList.remove("todoUncompleting");
+		}
 	},
 
 	filterTodoistData: function (tasks) {
@@ -958,19 +872,15 @@ Module.register("MMM-Todoist", {
 			}
 			divRow.setAttribute("data-task-id", item.id);
 
-			divRow.addEventListener("click", (function(taskId) {
+			divRow.addEventListener("click", (function(taskId, isCompleted) {
 				return function() {
-					var task = self.getTaskById(taskId);
-					if (!task) {
-						return;
-					}
-					if (self.isCompletedItem(task)) {
+					if (isCompleted) {
 						self.uncompleteTask(taskId);
 					} else {
 						self.completeTask(taskId);
 					}
 				};
-			})(item.id));
+			})(item.id, item.is_completed));
 
 			//Columns
 			divRow.appendChild(this.addPriorityIndicatorCell(item));
