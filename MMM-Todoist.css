@@ -21,6 +21,7 @@
 
 .spacerCell {
     width: 3px;
+    padding: 0 !important;
 }
 
 .todoDueOverdue {
@@ -74,8 +75,9 @@
 .divTableCell, .divTableHead {
 	/* border: 1px solid #999999; */
 	display: table-cell;
-	/* Modest padding for easier touch targets (less than prior 16px attempt) */
-	padding: 8px 10px;
+	/* Modest padding for easier touch targets: keep taller rows (vertical),
+	   but tight horizontal padding so the module doesn't overrun its region. */
+	padding: 8px 4px;
 	vertical-align: middle;
 }
 
@@ -145,6 +147,6 @@
 	text-decoration: line-through;
 }
 .todoTextCell {
-    width: 400px;
+    width: 240px;
     overflow: hidden;
 }
