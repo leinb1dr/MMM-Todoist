@@ -486,9 +486,13 @@ Module.register("MMM-Todoist", {
 		};
 
 		// Wait until MagicMirror has inserted the module into the layout
-		requestAnimationFrame(function () {
-			requestAnimationFrame(apply);
-		});
+		if (grid.isConnected && grid.closest(".module")) {
+			apply();
+		} else {
+			requestAnimationFrame(function () {
+				requestAnimationFrame(apply);
+			});
+		}
 
 		if (!this._todoGridResizeHandler) {
 			var self = this;
