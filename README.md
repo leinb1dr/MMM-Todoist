@@ -117,6 +117,13 @@ The following properties can be configured:
 			</td>
 		</tr>
 		<tr>
+			<td><code>displayMode</code></td>
+			<td>Layout for tasks. Use <code>grid</code> for a 2-column layout of large square tiles that are easier to tap on a touchscreen (especially for kids). Use <code>list</code> for the classic row layout.<br>
+				<br><b>Possible values:</b> <code>"grid"</code> or <code>"list"</code>
+				<br><b>Default value:</b> <code>"grid"</code>
+			</td>
+		</tr>
+		<tr>
 			<td><code>showComplete</code></td>
 			<td>Show tasks completed today below active tasks, crossed off.<br>
 				<br><b>Possible values:</b> <code>boolean</code>
