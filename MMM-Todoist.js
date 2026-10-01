@@ -55,6 +55,12 @@ Module.register("MMM-Todoist", {
 		displayAvatar: false,
 		showProject: true,
 		showComplete: false,
+		// "list" = classic rows; "grid" = 2-column large square tiles (easier for kids/touch)
+		displayMode: "grid",
+		gridColumns: 2,
+		gridMinTileSize: 96, // px — tiles won't shrink below this (keep tappable for kids)
+		gridMaxTileSize: 180, // px — upper bound when only a few tasks are shown
+		gridGap: 12, // px — space between tiles
 		// projectColors: ["#95ef63", "#ff8581", "#ffc471", "#f9ec75", "#a8c8e4", "#d2b8a3", "#e2a8e4", "#cccccc", "#fb886e",
 		// 	"#ffcc00", "#74e8d3", "#3bd5fb", "#dc4fad", "#ac193d", "#d24726", "#82ba00", "#03b3b2", "#008299",
 		// 	"#5db2ff", "#0072c6", "#000000", "#777777"
@@ -269,7 +275,7 @@ Module.register("MMM-Todoist", {
 	},
 
 	completeTask: function (taskId) {
-		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + taskId + '"]');
 		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
 			return;
 		}
@@ -292,7 +298,7 @@ Module.register("MMM-Todoist", {
 	},
 
 	uncompleteTask: function (taskId) {
-		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + taskId + '"]');
 		if (row && (row.classList.contains("todoCompleting") || row.classList.contains("todoUncompleting"))) {
 			return;
 		}
@@ -312,7 +318,7 @@ Module.register("MMM-Todoist", {
 		Log.info("MMM-Todoist: Task " + taskId + (isRecurring ? " completed as recurring" : " closed") + " successfully.");
 
 		if (isRecurring) {
-			var recurringRow = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+			var recurringRow = document.querySelector('[data-task-id="' + taskId + '"]');
 			if (recurringRow) {
 				recurringRow.classList.remove("todoCompleting");
 			}
@@ -339,7 +345,7 @@ Module.register("MMM-Todoist", {
 		}
 
 		var self = this;
-		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + taskId + '"]');
 		if (row) {
 			row.classList.remove("todoCompleting");
 			row.classList.add("todoCompleted");
@@ -368,7 +374,7 @@ Module.register("MMM-Todoist", {
 			this.tasks.items = this.activeItemsFirst(this.tasks.items);
 		}
 
-		var row = document.querySelector('.divTableRow[data-task-id="' + taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + taskId + '"]');
 		if (row) {
 			row.classList.remove("todoUncompleting");
 			row.classList.remove("todoComplete");
@@ -411,7 +417,7 @@ Module.register("MMM-Todoist", {
 
 	handleCloseTaskError: function (payload) {
 		Log.error("MMM-Todoist: Failed to close task " + payload.taskId + ": " + payload.error);
-		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + payload.taskId + '"]');
 		if (row) {
 			row.classList.remove("todoCompleting");
 		}
@@ -419,10 +425,284 @@ Module.register("MMM-Todoist", {
 
 	handleUncompleteTaskError: function (payload) {
 		Log.error("MMM-Todoist: Failed to uncomplete task " + payload.taskId + ": " + payload.error);
-		var row = document.querySelector('.divTableRow[data-task-id="' + payload.taskId + '"]');
+		var row = document.querySelector('[data-task-id="' + payload.taskId + '"]');
 		if (row) {
 			row.classList.remove("todoUncompleting");
 		}
+	},
+
+	isGridMode: function () {
+		return this.config.displayMode === "grid";
+	},
+
+	getGridLayoutMetrics: function (itemCount) {
+		var cols = Math.max(1, parseInt(this.config.gridColumns, 10) || 2);
+		var minSize = Math.max(48, parseInt(this.config.gridMinTileSize, 10) || 96);
+		var maxSize = Math.max(minSize, parseInt(this.config.gridMaxTileSize, 10) || 180);
+		var gap = Math.max(4, parseInt(this.config.gridGap, 10) || 12);
+		var count = Math.max(itemCount || 0, 1);
+		return {
+			cols: cols,
+			minSize: minSize,
+			maxSize: maxSize,
+			gap: gap,
+			rows: Math.ceil(count / cols)
+		};
+	},
+
+	/**
+	 * Size grid tiles to fit the module width and remaining viewport height.
+	 * With many tasks the squares shrink; they stop at gridMinTileSize.
+	 */
+	applyGridTileSizing: function (grid, itemCount) {
+		var metrics = this.getGridLayoutMetrics(itemCount);
+		grid.style.setProperty("--todo-grid-cols", String(metrics.cols));
+		grid.style.setProperty("--todo-grid-gap", metrics.gap + "px");
+		grid.style.setProperty("--todo-grid-min", metrics.minSize + "px");
+
+		var apply = function () {
+			var moduleEl = grid.closest(".module") || grid.parentElement || grid;
+			var availableWidth = moduleEl.clientWidth || grid.clientWidth || 300;
+			var top = 0;
+			if (moduleEl.getBoundingClientRect) {
+				top = moduleEl.getBoundingClientRect().top;
+			}
+			// Fit within the remaining viewport under the module header
+			var availableHeight = Math.max(metrics.minSize, window.innerHeight - top - 16);
+
+			var sizeByWidth = Math.floor((availableWidth - metrics.gap * (metrics.cols - 1)) / metrics.cols);
+			var sizeByHeight = Math.floor((availableHeight - metrics.gap * (metrics.rows - 1)) / metrics.rows);
+			var tileSize = Math.min(sizeByWidth, sizeByHeight, metrics.maxSize);
+			tileSize = Math.max(metrics.minSize, tileSize);
+
+			grid.style.setProperty("--todo-tile-size", tileSize + "px");
+			var titlePx = Math.max(13, Math.min(26, Math.round(tileSize * 0.15)));
+			grid.style.setProperty("--todo-tile-title-size", titlePx + "px");
+			if (tileSize <= 120) {
+				grid.classList.add("todoGrid--compact");
+			} else {
+				grid.classList.remove("todoGrid--compact");
+			}
+		};
+
+		// MagicMirror may delay inserting getDom() output (e.g. updateDom(1000)),
+		// so retry until the grid is actually in the document, then measure.
+		var applyWhenReady = function (attempt) {
+			if (!grid.isConnected) {
+				if (attempt < 50) {
+					setTimeout(function () {
+						applyWhenReady(attempt + 1);
+					}, 50);
+				}
+				return;
+			}
+			apply();
+			// Re-measure once after layout settles (fonts/regions)
+			setTimeout(apply, 100);
+		};
+		applyWhenReady(0);
+
+		if (!this._todoGridResizeHandler) {
+			var self = this;
+			this._todoGridResizeHandler = function () {
+				var liveGrid = document.querySelector('.module[id="' + self.identifier + '"] .todoGrid') ||
+					document.querySelector("#" + self.identifier + " .todoGrid") ||
+					document.querySelector(".todoGrid");
+				if (liveGrid && self.tasks && self.tasks.items) {
+					self.applyGridTileSizing(liveGrid, self.tasks.items.length);
+				}
+			};
+			window.addEventListener("resize", this._todoGridResizeHandler);
+		}
+	},
+
+	getTaskTitleHtml: function (item, wrapEvents, maxTitleLength) {
+		var taskText = "";
+		if (item.contentHtml) {
+			var temp = document.createElement("div");
+			temp.innerHTML = item.contentHtml;
+			var para = temp.getElementsByTagName("p");
+			if (para && para.length > 0) {
+				taskText = para[0].innerHTML;
+			} else {
+				taskText = temp.textContent || temp.innerText || item.content || "";
+			}
+		} else {
+			taskText = item.content || "";
+		}
+
+		if (this.config.sortType === "todoist" && item.parent_id && !this.isGridMode()) {
+			taskText = "- " + taskText;
+		}
+
+		var displayText = this.shorten(taskText, maxTitleLength, wrapEvents);
+		if (item.is_completed) {
+			displayText = "<s>" + displayText + "</s>";
+		}
+		return displayText;
+	},
+
+	getDueDateDisplay: function (item) {
+		var className = "bright align-right dueDate ";
+		var innerHTML = "";
+
+		if (item.is_completed || !item.due || !item.due.date) {
+			return { className: className + "xsmall", innerHTML: innerHTML };
+		}
+
+		var oneDay = 24 * 60 * 60 * 1000;
+		var dueDateTime = this.parseDueDate(item.due.date);
+		var dueDate = new Date(dueDateTime.getFullYear(), dueDateTime.getMonth(), dueDateTime.getDate());
+		var now = new Date();
+		var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		var diffDays = Math.floor((dueDate - today) / (oneDay));
+		var diffMonths = (dueDate.getFullYear() * 12 + dueDate.getMonth()) - (now.getFullYear() * 12 + now.getMonth());
+
+		if (diffDays < -1) {
+			innerHTML = dueDate.toLocaleDateString(config.language, {
+				"month": "short"
+			}) + " " + dueDate.getDate();
+			className += "xsmall todoDueOverdue";
+		} else if (diffDays === -1) {
+			innerHTML = this.translate("YESTERDAY");
+			className += "xsmall todoDueOverdue";
+		} else if (diffDays === 0) {
+			innerHTML = this.translate("TODAY");
+			if (item.all_day || dueDateTime >= now) {
+				className += "todoDueToday";
+			} else {
+				className += "todoDueOverdue";
+			}
+		} else if (diffDays === 1) {
+			innerHTML = this.translate("TOMORROW");
+			className += "xsmall todoDueTomorrow";
+		} else if (diffDays < 7) {
+			innerHTML = dueDate.toLocaleDateString(config.language, {
+				"weekday": "short"
+			});
+			className += "xsmall";
+		} else if (diffMonths < 7 || dueDate.getFullYear() == now.getFullYear()) {
+			innerHTML = dueDate.toLocaleDateString(config.language, {
+				"month": "short"
+			}) + " " + dueDate.getDate();
+			className += "xsmall";
+		} else if (item.due.date === "2100-12-31") {
+			innerHTML = "";
+			className += "xsmall";
+		} else {
+			innerHTML = dueDate.toLocaleDateString(config.language, {
+				"month": "short"
+			}) + " " + dueDate.getDate() + " " + dueDate.getFullYear();
+			className += "xsmall";
+		}
+
+		if (innerHTML !== "" && !item.all_day) {
+			function formatTime(d) {
+				function z(n) {
+					return (n < 10 ? "0" : "") + n;
+				}
+				var h = d.getHours();
+				var m = z(d.getMinutes());
+				if (config.timeFormat == 12) {
+					return " " + (h % 12 || 12) + ":" + m + (h < 12 ? " AM" : " PM");
+				} else {
+					return " " + h + ":" + m;
+				}
+			}
+			innerHTML += formatTime(dueDateTime);
+		}
+
+		return { className: className, innerHTML: innerHTML };
+	},
+
+	getPriorityClassName: function (item) {
+		switch (item.priority) {
+			case 4:
+				return "priority priority1";
+			case 3:
+				return "priority priority2";
+			case 2:
+				return "priority priority3";
+			default:
+				return "";
+		}
+	},
+
+	bindTaskClick: function (element, item) {
+		var self = this;
+		element.addEventListener("click", (function (taskId, isCompleted) {
+			return function () {
+				if (isCompleted) {
+					self.uncompleteTask(taskId);
+				} else {
+					self.completeTask(taskId);
+				}
+			};
+		})(item.id, item.is_completed));
+	},
+
+	createTodoTile: function (item, collaboratorsMap) {
+		var tile = document.createElement("div");
+		tile.className = "todoTile";
+		if (item.is_completed) {
+			tile.className += " todoComplete";
+		}
+		tile.setAttribute("data-task-id", item.id);
+
+		var priorityClass = this.getPriorityClassName(item);
+		if (priorityClass) {
+			tile.classList.add("hasPriority");
+			var priorityBar = document.createElement("div");
+			priorityBar.className = "todoTilePriority " + priorityClass;
+			tile.appendChild(priorityBar);
+		}
+
+		var title = document.createElement("div");
+		title.className = "todoTileTitle title bright";
+		// Grid tiles have room to wrap; prefer wrapping over aggressive truncation
+		var maxLen = Math.max(this.config.maxTitleLength || 25, 40);
+		title.innerHTML = this.getTaskTitleHtml(item, true, maxLen);
+		tile.appendChild(title);
+
+		var meta = document.createElement("div");
+		meta.className = "todoTileMeta";
+
+		var due = this.getDueDateDisplay(item);
+		if (due.innerHTML) {
+			var dueEl = document.createElement("div");
+			dueEl.className = "todoTileDue " + due.className;
+			dueEl.innerHTML = due.innerHTML;
+			meta.appendChild(dueEl);
+		}
+
+		if (this.config.showProject) {
+			var project = this.tasks.projects.find(p => p.id === item.project_id);
+			if (project) {
+				var projectEl = document.createElement("div");
+				projectEl.className = "todoTileProject xsmall";
+				var projectcolor = this.config.projectColors[project.color] || "#cccccc";
+				projectEl.innerHTML = "<span class='projectcolor' style='color: " + projectcolor + "; background-color: " + projectcolor + "'></span>" + (project.name || "");
+				meta.appendChild(projectEl);
+			}
+		}
+
+		if (this.config.displayAvatar) {
+			var avatarWrap = document.createElement("div");
+			avatarWrap.className = "todoTileAvatar";
+			var avatarCell = this.addAssigneeAvatorCell(item, collaboratorsMap);
+			var avatarImg = avatarCell.querySelector("img");
+			if (avatarImg) {
+				avatarWrap.appendChild(avatarImg);
+				meta.appendChild(avatarWrap);
+			}
+		}
+
+		if (meta.childNodes.length > 0) {
+			tile.appendChild(meta);
+		}
+
+		this.bindTaskClick(tile, item);
+		return tile;
 	},
 
 	filterTodoistData: function (tasks) {
@@ -674,122 +954,20 @@ Module.register("MMM-Todoist", {
 		return cell;
 	},
 	addPriorityIndicatorCell: function(item) {
-		var className = "priority ";
-		switch (item.priority) {
-			case 4:
-				className += "priority1";
-				break;
-			case 3:
-				className += "priority2";
-				break;
-			case 2:
-				className += "priority3";
-				break;
-			default:
-				className = "";
-				break;
-		}
-		return this.createCell(className, "&nbsp;");;
+		return this.createCell(this.getPriorityClassName(item), "&nbsp;");
 	},
 	addColumnSpacerCell: function() {
 		return this.createCell("spacerCell", "&nbsp;");
 	},
 	addTodoTextCell: function(item) {
-		var taskText = "";
-		if (item.contentHtml) {
-			var temp = document.createElement('div');
-			temp.innerHTML = item.contentHtml;
-			var para = temp.getElementsByTagName('p');
-			if (para && para.length > 0) {
-				taskText = para[0].innerHTML;
-			} else {
-				taskText = temp.textContent || temp.innerText || item.content || "";
-			}
-		} else {
-			taskText = item.content || "";
-		}
-		
-		// if sorting by todoist, indent subtasks under their parents
-		if (this.config.sortType === "todoist" && item.parent_id) {
-			// this item is a subtask so indent it
-			taskText = '- ' + taskText;
-		}
-		var displayText = this.shorten(taskText, this.config.maxTitleLength, this.config.wrapEvents);
-		if (item.is_completed) {
-			displayText = "<s>" + displayText + "</s>";
-		}
-		return this.createCell("title bright alignLeft", displayText);
+		return this.createCell(
+			"title bright alignLeft",
+			this.getTaskTitleHtml(item, this.config.wrapEvents, this.config.maxTitleLength)
+		);
 	},
 	addDueDateCell: function(item) {
-		var className = "bright align-right dueDate ";
-		var innerHTML = "";
-
-		if (item.is_completed || !item.due || !item.due.date) {
-			return this.createCell(className + "xsmall", innerHTML);
-		}
-		
-		var oneDay = 24 * 60 * 60 * 1000;
-		var dueDateTime = this.parseDueDate(item.due.date);
-		var dueDate = new Date(dueDateTime.getFullYear(), dueDateTime.getMonth(), dueDateTime.getDate());
-		var now = new Date();
-		var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-		var diffDays = Math.floor((dueDate - today) / (oneDay));
-		var diffMonths = (dueDate.getFullYear() * 12 + dueDate.getMonth()) - (now.getFullYear() * 12 + now.getMonth());
-
-		if (diffDays < -1) {
-			innerHTML = dueDate.toLocaleDateString(config.language, {
-												"month": "short"
-											}) + " " + dueDate.getDate();
-			className += "xsmall todoDueOverdue";
-		} else if (diffDays === -1) {
-			innerHTML = this.translate("YESTERDAY");
-			className += "xsmall todoDueOverdue";
-		} else if (diffDays === 0) {
-			innerHTML = this.translate("TODAY");
-			if (item.all_day || dueDateTime >= now) {
-				className += "todoDueToday";
-			} else {
-				className += "todoDueOverdue";
-			}
-		} else if (diffDays === 1) {
-			innerHTML = this.translate("TOMORROW");
-			className += "xsmall todoDueTomorrow";
-		} else if (diffDays < 7) {
-			innerHTML = dueDate.toLocaleDateString(config.language, {
-				"weekday": "short"
-			});
-			className += "xsmall";
-		} else if (diffMonths < 7 || dueDate.getFullYear() == now.getFullYear()) {
-			innerHTML = dueDate.toLocaleDateString(config.language, {
-				"month": "short"
-			}) + " " + dueDate.getDate();
-			className += "xsmall";
-		} else if (item.due.date === "2100-12-31") {
-			innerHTML = "";
-			className += "xsmall";
-		} else {
-			innerHTML = dueDate.toLocaleDateString(config.language, {
-				"month": "short"
-			}) + " " + dueDate.getDate() + " " + dueDate.getFullYear();
-			className += "xsmall";
-		}
-
-		if (innerHTML !== "" && !item.all_day) {
-			function formatTime(d) {
-				function z(n) {
-					return (n < 10 ? "0" : "") + n;
-				}
-				var h = d.getHours();
-				var m = z(d.getMinutes());
-				if (config.timeFormat == 12) {
-					return " " + (h % 12 || 12) + ":" + m + (h < 12 ? " AM" : " PM");
-				} else {
-					return " " + h + ":" + m;
-				}
-			}
-			innerHTML += formatTime(dueDateTime);
-		}
-		return this.createCell(className, innerHTML);
+		var due = this.getDueDateDisplay(item);
+		return this.createCell(due.className, due.innerHTML);
 	},
 	addProjectCell: function(item) {
 		var project = this.tasks.projects.find(p => p.id === item.project_id);
@@ -835,14 +1013,6 @@ Module.register("MMM-Todoist", {
 			return wrapper;
 		}
 
-
-		//New CSS based Table
-		var divTable = document.createElement("div");
-		divTable.className = "divTable normal small light";
-
-		var divBody = document.createElement("div");
-		divBody.className = "divTableBody";
-		
 		if (this.tasks === undefined || !this.tasks.items) {
 			return wrapper;
 		}
@@ -858,51 +1028,70 @@ Module.register("MMM-Todoist", {
 			}
 		}
 
-		//Iterate through Todos
-		var self = this;
-		this.tasks.items.forEach((item, index) => {
-			var divRow = document.createElement("div");
-			//Add the Row
-			divRow.className = "divTableRow";
-			if (item.is_completed) {
-				divRow.className += " todoComplete";
-				if (index > 0 && !this.tasks.items[index - 1].is_completed) {
-					divRow.className += " todoCompletedSectionStart";
-				}
-			}
-			divRow.setAttribute("data-task-id", item.id);
+		var itemNodesSelector;
+		if (this.isGridMode()) {
+			var grid = document.createElement("div");
+			grid.className = "todoGrid normal small light";
 
-			divRow.addEventListener("click", (function(taskId, isCompleted) {
-				return function() {
-					if (isCompleted) {
-						self.uncompleteTask(taskId);
-					} else {
-						self.completeTask(taskId);
+			this.tasks.items.forEach((item) => {
+				grid.appendChild(this.createTodoTile(item, collaboratorsMap));
+			});
+
+			this.applyGridTileSizing(grid, this.tasks.items.length);
+			wrapper.appendChild(grid);
+			itemNodesSelector = ".todoTile";
+		} else {
+			// Classic CSS table list
+			var divTable = document.createElement("div");
+			divTable.className = "divTable normal small light";
+
+			var divBody = document.createElement("div");
+			divBody.className = "divTableBody";
+
+			this.tasks.items.forEach((item, index) => {
+				var divRow = document.createElement("div");
+				divRow.className = "divTableRow";
+				if (item.is_completed) {
+					divRow.className += " todoComplete";
+					if (index > 0 && !this.tasks.items[index - 1].is_completed) {
+						divRow.className += " todoCompletedSectionStart";
 					}
-				};
-			})(item.id, item.is_completed));
+				}
+				divRow.setAttribute("data-task-id", item.id);
+				this.bindTaskClick(divRow, item);
 
-			//Columns
-			divRow.appendChild(this.addPriorityIndicatorCell(item));
-			divRow.appendChild(this.addColumnSpacerCell());
-			divRow.appendChild(this.addTodoTextCell(item));
-			divRow.appendChild(this.addDueDateCell(item));
-			if (this.config.showProject) {
+				divRow.appendChild(this.addPriorityIndicatorCell(item));
 				divRow.appendChild(this.addColumnSpacerCell());
-				divRow.appendChild(this.addProjectCell(item));
-			}
-			if (this.config.displayAvatar) {
-				divRow.appendChild(this.addAssigneeAvatorCell(item, collaboratorsMap));
-			}
+				divRow.appendChild(this.addTodoTextCell(item));
+				divRow.appendChild(this.addDueDateCell(item));
+				if (this.config.showProject) {
+					divRow.appendChild(this.addColumnSpacerCell());
+					divRow.appendChild(this.addProjectCell(item));
+				}
+				if (this.config.displayAvatar) {
+					divRow.appendChild(this.addAssigneeAvatorCell(item, collaboratorsMap));
+				}
 
-			divBody.appendChild(divRow);
-		});
-		
-		divTable.appendChild(divBody);
-		wrapper.appendChild(divTable);
+				divBody.appendChild(divRow);
+			});
 
-		// create the gradient
-		if (this.config.fade && this.config.fadePoint < 1) divTable.querySelectorAll('.divTableRow').forEach((row, i, rows) => row.style.opacity = Math.max(0, Math.min(1 - ((((i + 1) * (1 / (rows.length))) - this.config.fadePoint) / (1 - this.config.fadePoint)) * (1 - this.config.fadeMinimumOpacity), 1)));
+			divTable.appendChild(divBody);
+			wrapper.appendChild(divTable);
+			itemNodesSelector = ".divTableRow";
+		}
+
+		// Fade is list-oriented; skip it for grid tiles so every square stays equally tappable
+		if (!this.isGridMode() && this.config.fade && this.config.fadePoint < 1) {
+			wrapper.querySelectorAll(itemNodesSelector).forEach((row, i, rows) => {
+				row.style.opacity = Math.max(
+					0,
+					Math.min(
+						1 - ((((i + 1) * (1 / (rows.length))) - this.config.fadePoint) / (1 - this.config.fadePoint)) * (1 - this.config.fadeMinimumOpacity),
+						1
+					)
+				);
+			});
+		}
 
 		// display the update time at the end, if defined so by the user config
 		if (this.config.displayLastUpdate) {
