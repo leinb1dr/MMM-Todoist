@@ -461,10 +461,6 @@ Module.register("MMM-Todoist", {
 		grid.style.setProperty("--todo-grid-min", metrics.minSize + "px");
 
 		var apply = function () {
-			if (!grid.isConnected) {
-				return;
-			}
-
 			var moduleEl = grid.closest(".module") || grid.parentElement || grid;
 			var availableWidth = moduleEl.clientWidth || grid.clientWidth || 300;
 			var top = 0;
@@ -482,17 +478,29 @@ Module.register("MMM-Todoist", {
 			grid.style.setProperty("--todo-tile-size", tileSize + "px");
 			var titlePx = Math.max(13, Math.min(26, Math.round(tileSize * 0.15)));
 			grid.style.setProperty("--todo-tile-title-size", titlePx + "px");
-			grid.classList.toggle("todoGrid--compact", tileSize < 120);
+			if (tileSize <= 120) {
+				grid.classList.add("todoGrid--compact");
+			} else {
+				grid.classList.remove("todoGrid--compact");
+			}
 		};
 
-		// Wait until MagicMirror has inserted the module into the layout
-		if (grid.isConnected && grid.closest(".module")) {
+		// MagicMirror may delay inserting getDom() output (e.g. updateDom(1000)),
+		// so retry until the grid is actually in the document, then measure.
+		var applyWhenReady = function (attempt) {
+			if (!grid.isConnected) {
+				if (attempt < 50) {
+					setTimeout(function () {
+						applyWhenReady(attempt + 1);
+					}, 50);
+				}
+				return;
+			}
 			apply();
-		} else {
-			requestAnimationFrame(function () {
-				requestAnimationFrame(apply);
-			});
-		}
+			// Re-measure once after layout settles (fonts/regions)
+			setTimeout(apply, 100);
+		};
+		applyWhenReady(0);
 
 		if (!this._todoGridResizeHandler) {
 			var self = this;
