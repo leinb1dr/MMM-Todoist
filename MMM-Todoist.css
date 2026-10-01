@@ -161,24 +161,33 @@
 
 /* ===== 2-column large square grid (displayMode: "grid") ===== */
 .todoGrid {
+	--todo-grid-cols: 2;
+	--todo-grid-gap: 12px;
+	--todo-grid-min: 96px;
+	--todo-tile-size: 160px;
+	--todo-tile-title-size: 1.35em;
 	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 16px;
-	width: 100%;
+	grid-template-columns: repeat(var(--todo-grid-cols), var(--todo-tile-size));
+	gap: var(--todo-grid-gap);
+	width: max-content;
+	max-width: 100%;
 	box-sizing: border-box;
+	justify-content: end;
 }
 
 .todoTile {
 	position: relative;
-	width: 100%;
+	width: var(--todo-tile-size);
+	height: var(--todo-tile-size);
+	min-width: var(--todo-grid-min);
+	min-height: var(--todo-grid-min);
 	aspect-ratio: 1 / 1;
-	/* Keep tiles square: do not set min-height (it stretches tall in narrow regions) */
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
 	box-sizing: border-box;
-	padding: 16px 12px 12px;
+	padding: clamp(8px, calc(var(--todo-tile-size) * 0.08), 16px);
 	border: 2px solid rgba(255, 255, 255, 0.28);
 	border-radius: 8px;
 	background-color: rgba(255, 255, 255, 0.06);
@@ -210,7 +219,7 @@
 	align-items: center;
 	justify-content: center;
 	text-align: center;
-	font-size: 1.35em;
+	font-size: var(--todo-tile-title-size, 1.35em);
 	line-height: 1.25;
 	width: 100%;
 	padding: 0 4px;
@@ -227,6 +236,15 @@
 	gap: 4px;
 	margin-top: 8px;
 	opacity: 0.9;
+}
+
+/* When tiles shrink toward the minimum, drop meta so the title stays readable */
+.todoGrid--compact .todoTileMeta {
+	display: none;
+}
+
+.todoGrid--compact .todoTileTitle {
+	font-weight: 600;
 }
 
 .todoTileDue {

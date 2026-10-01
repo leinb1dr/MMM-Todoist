@@ -57,6 +57,10 @@ Module.register("MMM-Todoist", {
 		showComplete: false,
 		// "list" = classic rows; "grid" = 2-column large square tiles (easier for kids/touch)
 		displayMode: "grid",
+		gridColumns: 2,
+		gridMinTileSize: 96, // px — tiles won't shrink below this (keep tappable for kids)
+		gridMaxTileSize: 180, // px — upper bound when only a few tasks are shown
+		gridGap: 12, // px — space between tiles
 		// projectColors: ["#95ef63", "#ff8581", "#ffc471", "#f9ec75", "#a8c8e4", "#d2b8a3", "#e2a8e4", "#cccccc", "#fb886e",
 		// 	"#ffcc00", "#74e8d3", "#3bd5fb", "#dc4fad", "#ac193d", "#d24726", "#82ba00", "#03b3b2", "#008299",
 		// 	"#5db2ff", "#0072c6", "#000000", "#777777"
@@ -429,6 +433,75 @@ Module.register("MMM-Todoist", {
 
 	isGridMode: function () {
 		return this.config.displayMode === "grid";
+	},
+
+	getGridLayoutMetrics: function (itemCount) {
+		var cols = Math.max(1, parseInt(this.config.gridColumns, 10) || 2);
+		var minSize = Math.max(48, parseInt(this.config.gridMinTileSize, 10) || 96);
+		var maxSize = Math.max(minSize, parseInt(this.config.gridMaxTileSize, 10) || 180);
+		var gap = Math.max(4, parseInt(this.config.gridGap, 10) || 12);
+		var count = Math.max(itemCount || 0, 1);
+		return {
+			cols: cols,
+			minSize: minSize,
+			maxSize: maxSize,
+			gap: gap,
+			rows: Math.ceil(count / cols)
+		};
+	},
+
+	/**
+	 * Size grid tiles to fit the module width and remaining viewport height.
+	 * With many tasks the squares shrink; they stop at gridMinTileSize.
+	 */
+	applyGridTileSizing: function (grid, itemCount) {
+		var metrics = this.getGridLayoutMetrics(itemCount);
+		grid.style.setProperty("--todo-grid-cols", String(metrics.cols));
+		grid.style.setProperty("--todo-grid-gap", metrics.gap + "px");
+		grid.style.setProperty("--todo-grid-min", metrics.minSize + "px");
+
+		var apply = function () {
+			if (!grid.isConnected) {
+				return;
+			}
+
+			var moduleEl = grid.closest(".module") || grid.parentElement || grid;
+			var availableWidth = moduleEl.clientWidth || grid.clientWidth || 300;
+			var top = 0;
+			if (moduleEl.getBoundingClientRect) {
+				top = moduleEl.getBoundingClientRect().top;
+			}
+			// Fit within the remaining viewport under the module header
+			var availableHeight = Math.max(metrics.minSize, window.innerHeight - top - 16);
+
+			var sizeByWidth = Math.floor((availableWidth - metrics.gap * (metrics.cols - 1)) / metrics.cols);
+			var sizeByHeight = Math.floor((availableHeight - metrics.gap * (metrics.rows - 1)) / metrics.rows);
+			var tileSize = Math.min(sizeByWidth, sizeByHeight, metrics.maxSize);
+			tileSize = Math.max(metrics.minSize, tileSize);
+
+			grid.style.setProperty("--todo-tile-size", tileSize + "px");
+			var titlePx = Math.max(13, Math.min(26, Math.round(tileSize * 0.15)));
+			grid.style.setProperty("--todo-tile-title-size", titlePx + "px");
+			grid.classList.toggle("todoGrid--compact", tileSize < 120);
+		};
+
+		// Wait until MagicMirror has inserted the module into the layout
+		requestAnimationFrame(function () {
+			requestAnimationFrame(apply);
+		});
+
+		if (!this._todoGridResizeHandler) {
+			var self = this;
+			this._todoGridResizeHandler = function () {
+				var liveGrid = document.querySelector('.module[id="' + self.identifier + '"] .todoGrid') ||
+					document.querySelector("#" + self.identifier + " .todoGrid") ||
+					document.querySelector(".todoGrid");
+				if (liveGrid && self.tasks && self.tasks.items) {
+					self.applyGridTileSizing(liveGrid, self.tasks.items.length);
+				}
+			};
+			window.addEventListener("resize", this._todoGridResizeHandler);
+		}
 	},
 
 	getTaskTitleHtml: function (item, wrapEvents, maxTitleLength) {
@@ -952,6 +1025,7 @@ Module.register("MMM-Todoist", {
 				grid.appendChild(this.createTodoTile(item, collaboratorsMap));
 			});
 
+			this.applyGridTileSizing(grid, this.tasks.items.length);
 			wrapper.appendChild(grid);
 			itemNodesSelector = ".todoTile";
 		} else {
